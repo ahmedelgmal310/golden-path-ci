@@ -90,7 +90,11 @@ assert_failure() {
     elif [ -n "$earlier_bad" ]; then
       reason="steps before the gate did not pass: ${earlier_bad}"
     else
-      gh api "repos/${repo}/actions/jobs/${id}/logs" > "$workdir/${id}.log"
+      # Job logs contain ANSI colour codes, which gh refuses to print; fetch
+      # them with curl and strip the escapes before matching.
+      curl -fsSL -H "Authorization: Bearer ${GH_TOKEN:?}" -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${repo}/actions/jobs/${id}/logs" \
+        | sed 's/\x1b\[[0-9;]*m//g' > "$workdir/${id}.log"
       for pattern in "$@"; do
         if ! grep -Eq -- "$pattern" "$workdir/${id}.log"; then
           reason="log does not match /${pattern}/"
