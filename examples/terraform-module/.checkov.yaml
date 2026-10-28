@@ -1,0 +1,8 @@
+# Documented exceptions. Each skip names the control and why it does not apply
+# to this module; anything not listed here fails the build.
+skip-check:
+  # Cross-region replication needs a second bucket, region and IAM role; it is a
+  # deployment decision for the caller, not something a generic module forces.
+  - CKV_AWS_144
+  # S3 event notifications have no consumer in this module.
+  - CKV2_AWS_62

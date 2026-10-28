@@ -1,0 +1,70 @@
+# Cache benchmark: run every example once with a brand-new cache namespace
+# (cold), then dispatch again with the same namespace (warm).
+# scripts/bench-report.sh turns the two runs into the README table.
+name: benchmark
+
+run-name: "benchmark cache-version=${{ inputs.cache-version }} (${{ inputs.label }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache-version:
+        description: "Cache namespace. Use a new value for a cold run, the same value again for a warm run."
+        type: string
+        required: true
+      label:
+        description: "cold or warm (only used in the run name)"
+        type: choice
+        options: [cold, warm]
+        default: cold
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  go-service:
+    name: go-service
+    uses: ./.github/workflows/go-service.yml
+    with:
+      working-directory: examples/go-service
+      cache-version: ${{ inputs.cache-version }}
+
+  node-service:
+    name: node-service
+    uses: ./.github/workflows/node-service.yml
+    with:
+      working-directory: examples/ts-service
+      cache-version: ${{ inputs.cache-version }}
+
+  helm-chart:
+    name: helm-chart
+    uses: ./.github/workflows/helm-chart.yml
+    with:
+      chart-path: examples/helm-chart/hello
+      values-files: examples/helm-chart/hello/values-prod.yaml
+      cache-version: ${{ inputs.cache-version }}
+
+  terraform:
+    name: terraform
+    uses: ./.github/workflows/terraform.yml
+    with:
+      working-directory: examples/terraform-module
+      cache-version: ${{ inputs.cache-version }}
+
+  container-image:
+    name: container-image
+    uses: ./.github/workflows/container-image.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/example-go-service
+      context: examples/go-service
+      push: false
+      cache-version: ${{ inputs.cache-version }}

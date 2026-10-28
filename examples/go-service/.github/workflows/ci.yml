@@ -1,0 +1,27 @@
+# What a Go service team commits to adopt the golden path. Self-test runs the
+# same reusable workflows on this example from the local checkout.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  go:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/go-service.yml@v1
+  image:
+    needs: go
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/container-image.yml@v1
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    with:
+      image-name: ghcr.io/acme/go-service
+      push: ${{ github.event_name == 'push' }}
+  security:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/security-baseline.yml@v1
+    permissions: { contents: read, security-events: write, actions: read }
+    with:
+      codeql-languages: '["actions","go"]'

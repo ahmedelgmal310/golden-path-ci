@@ -1,0 +1,76 @@
+name: golden-path setup-toolchain
+description: >-
+  Install a pinned Go or Node.js toolchain and restore its dependency and build
+  caches with one key scheme for every repository.
+author: Ahmed Elgamal
+
+inputs:
+  language:
+    description: "go or node"
+    required: true
+  version:
+    description: "Exact toolchain version, e.g. 1.27.3 for Go or 24.22.0 for Node.js"
+    required: true
+  working-directory:
+    description: "Directory that holds go.mod/go.sum or package.json/package-lock.json"
+    required: false
+    default: "."
+  cache-version:
+    description: "Cache namespace. Change it to invalidate every cache this action writes."
+    required: false
+    default: "v1"
+
+outputs:
+  cache-hit:
+    description: "true when the dependency cache was restored with an exact key match"
+    value: ${{ steps.go-cache.outputs.cache-hit || steps.node-cache.outputs.cache-hit || 'false' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        LANGUAGE: ${{ inputs.language }}
+      run: |
+        case "$LANGUAGE" in
+          go|node) ;;
+          *) echo "::error::setup-toolchain: language must be 'go' or 'node', got '$LANGUAGE'"; exit 1 ;;
+        esac
+
+    - name: Set up Go
+      if: inputs.language == 'go'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ inputs.version }}
+        cache: false
+
+    - name: Go module, build and lint caches
+      id: go-cache
+      if: inputs.language == 'go'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/.cache/golangci-lint
+        key: gp-go-${{ inputs.cache-version }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-${{ hashFiles(format('{0}/go.mod', inputs.working-directory), format('{0}/go.sum', inputs.working-directory)) }}
+        restore-keys: |
+          gp-go-${{ inputs.cache-version }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-
+
+    - name: Set up Node.js
+      if: inputs.language == 'node'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.version }}
+        package-manager-cache: false
+
+    - name: npm cache
+      id: node-cache
+      if: inputs.language == 'node'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.npm
+        key: gp-npm-${{ inputs.cache-version }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) }}
+        restore-keys: |
+          gp-npm-${{ inputs.cache-version }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-

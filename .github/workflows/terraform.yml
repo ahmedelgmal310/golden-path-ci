@@ -1,0 +1,146 @@
+# Reusable workflow: Terraform module quality gate.
+# fmt -check -> init (no backend) -> validate -> tflint -> Checkov.
+name: terraform
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Terraform root or module directory"
+        type: string
+        default: "."
+      terraform-version:
+        description: "Terraform release"
+        type: string
+        default: "1.16.5"
+      tflint-version:
+        description: "tflint release (must match tflint-sha256); empty skips tflint"
+        type: string
+        default: "v0.64.0"
+      tflint-sha256:
+        description: "SHA-256 of tflint_linux_amd64.zip for tflint-version"
+        type: string
+        default: "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537"
+      checkov-image:
+        description: "Checkov image pinned by digest; empty skips Checkov"
+        type: string
+        default: "bridgecrew/checkov:3.3.29@sha256:3cc125b5337717b7303dbddd4e79374c120687b5ff6a24f9abdad56b562469f3"
+      cache-version:
+        description: "Cache namespace; change it to invalidate caches"
+        type: string
+        default: "v1"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - name: Check out caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out golden-path actions at this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .golden-path
+          sparse-checkout: actions
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Provider, tflint and tool cache
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            ~/.tflint.d/plugins
+            ~/.cache/gp-bin
+          key: gp-tf-${{ inputs.cache-version }}-${{ runner.os }}-${{ inputs.tflint-version }}-${{ hashFiles(format('{0}/**/.terraform.lock.hcl', inputs.working-directory), format('{0}/**/.tflint.hcl', inputs.working-directory)) }}
+          restore-keys: |
+            gp-tf-${{ inputs.cache-version }}-${{ runner.os }}-${{ inputs.tflint-version }}-
+
+      - name: terraform fmt
+        id: fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform init
+        id: init
+        run: |
+          export TF_PLUGIN_CACHE_DIR="$HOME/.terraform.d/plugin-cache"
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terraform init -backend=false -lockfile=readonly
+
+      - name: terraform validate
+        id: validate
+        run: terraform validate
+
+      - name: Install tflint (SHA-256 verified)
+        if: inputs.tflint-version != ''
+        env:
+          VERSION: ${{ inputs.tflint-version }}
+          SHA256: ${{ inputs.tflint-sha256 }}
+        run: |
+          set -euo pipefail
+          bin="$HOME/.cache/gp-bin/tflint-${VERSION}"
+          if [ ! -x "$bin/tflint" ]; then
+            mkdir -p "$bin"
+            curl -fsSLo "$RUNNER_TEMP/tflint.zip" \
+              "https://github.com/terraform-linters/tflint/releases/download/${VERSION}/tflint_linux_amd64.zip"
+            echo "${SHA256}  $RUNNER_TEMP/tflint.zip" | sha256sum -c -
+            unzip -q -o "$RUNNER_TEMP/tflint.zip" -d "$bin"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: tflint
+        id: tflint
+        if: inputs.tflint-version != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # tflint --init downloads ruleset plugins from GitHub releases
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+
+      - name: Checkov
+        id: checkov
+        if: inputs.checkov-image != ''
+        env:
+          CHECKOV_IMAGE: ${{ inputs.checkov-image }}
+        run: |
+          set -euo pipefail
+          config=()
+          if [ -f .checkov.yaml ]; then config=(--config-file /src/.checkov.yaml); fi
+          docker run --rm -v "$PWD:/src:ro" "$CHECKOV_IMAGE" \
+            -d /src --framework terraform "${config[@]}" --compact --quiet --skip-download
+
+      - name: Summary
+        if: always()
+        uses: ./.golden-path/actions/job-summary
+        with:
+          title: Terraform
+          working-directory: ${{ inputs.working-directory }}
+          results: |
+            terraform fmt|${{ steps.fmt.outcome }}|Terraform ${{ inputs.terraform-version }}
+            terraform init|${{ steps.init.outcome }}|-backend=false -lockfile=readonly
+            terraform validate|${{ steps.validate.outcome }}|
+            tflint|${{ steps.tflint.outcome }}|${{ inputs.tflint-version }}
+            Checkov|${{ steps.checkov.outcome }}|terraform framework
+            provider cache|${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}|

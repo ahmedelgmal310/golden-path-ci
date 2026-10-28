@@ -1,0 +1,27 @@
+suite: service, service account, PDB
+templates:
+  - templates/service.yaml
+tests:
+  - it: renders a ClusterIP service on the named http port
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+
+  - it: renders a PDB by default
+    asserts:
+      - hasDocuments:
+          count: 3
+
+  - it: omits the PDB when disabled
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2

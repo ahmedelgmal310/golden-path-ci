@@ -1,0 +1,57 @@
+name: golden-path version-stamp
+description: >-
+  Derive one version string, short SHA and reproducible build timestamp for a
+  commit, so binaries, images and summaries all report the same identity.
+author: Ahmed Elgamal
+
+outputs:
+  version:
+    description: "X.Y.Z for a vX.Y.Z tag build, otherwise 0.0.0-<branch>.<short-sha>"
+    value: ${{ steps.stamp.outputs.version }}
+  short-sha:
+    description: "First 7 characters of the commit SHA"
+    value: ${{ steps.stamp.outputs.short-sha }}
+  build-date:
+    description: "Commit timestamp in RFC 3339 (UTC); stable across rebuilds of the same commit"
+    value: ${{ steps.stamp.outputs.build-date }}
+  image-tags:
+    description: "Newline-separated image tags: sha-<short>, plus the version for tag builds"
+    value: ${{ steps.stamp.outputs.image-tags }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute version
+      id: stamp
+      shell: bash
+      env:
+        REF: ${{ github.ref }}
+        REF_NAME: ${{ github.head_ref || github.ref_name }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        short="${SHA:0:7}"
+        if [[ "$REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          version="${BASH_REMATCH[1]}"
+        else
+          # Branch names become a SemVer pre-release identifier: [0-9A-Za-z-] only.
+          branch="$(printf '%s' "$REF_NAME" | tr -c '0-9A-Za-z-' '-' | cut -c1-40)"
+          version="0.0.0-${branch}.${short}"
+        fi
+        # Prefer the commit time from the local clone; fall back to "now" for
+        # shallow or missing checkouts so the action never fails a build.
+        if build_date="$(git log -1 --format=%cI "$SHA" 2>/dev/null)"; then
+          build_date="$(date -u -d "$build_date" +%Y-%m-%dT%H:%M:%SZ)"
+        else
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        fi
+        {
+          echo "version=$version"
+          echo "short-sha=$short"
+          echo "build-date=$build_date"
+          echo "image-tags<<EOF"
+          echo "sha-$short"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "$version"; fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        echo "version=$version short-sha=$short build-date=$build_date"

@@ -1,0 +1,151 @@
+# Reusable workflow: Go service quality gate.
+# vet -> golangci-lint -> race tests with a coverage gate -> govulncheck -> build.
+name: go-service
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory that contains go.mod"
+        type: string
+        default: "."
+      go-version:
+        description: "Exact Go version"
+        type: string
+        default: "1.27.3"
+      golangci-lint-version:
+        description: "golangci-lint release; set to an empty string to skip linting"
+        type: string
+        default: "v2.14.0"
+      govulncheck-version:
+        description: "golang.org/x/vuln version; set to an empty string to skip govulncheck"
+        type: string
+        default: "v1.9.0"
+      coverage-threshold:
+        description: "Minimum total statement coverage in percent"
+        type: number
+        default: 70
+      race:
+        description: "Run tests with the race detector"
+        type: boolean
+        default: true
+      build-target:
+        description: "Package pattern passed to go build"
+        type: string
+        default: "./..."
+      cache-version:
+        description: "Cache namespace; change it to invalidate caches"
+        type: string
+        default: "v1"
+    outputs:
+      coverage:
+        description: "Total statement coverage in percent"
+        value: ${{ jobs.go.outputs.coverage }}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    outputs:
+      coverage: ${{ steps.coverage.outputs.total }}
+    steps:
+      - name: Check out caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out golden-path actions at this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .golden-path
+          sparse-checkout: actions
+          persist-credentials: false
+
+      - name: Set up Go with caches
+        id: setup
+        uses: ./.golden-path/actions/setup-toolchain
+        with:
+          language: go
+          version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: go mod verify
+        id: verify
+        run: |
+          if [ -f go.sum ]; then go mod verify; else echo "no go.sum (stdlib only)"; fi
+
+      - name: go vet
+        id: vet
+        run: go vet ./...
+
+      - name: Install golangci-lint
+        if: inputs.golangci-lint-version != ''
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+          install-only: true
+
+      - name: golangci-lint
+        id: lint
+        if: inputs.golangci-lint-version != ''
+        run: golangci-lint run --timeout 5m ./...
+
+      - name: go test
+        id: test
+        env:
+          RACE: ${{ inputs.race }}
+        run: |
+          flags=(-covermode=atomic -coverprofile=coverage.out)
+          if [ "$RACE" = "true" ]; then flags+=(-race); fi
+          go test "${flags[@]}" ./...
+
+      - name: Coverage gate
+        id: coverage
+        env:
+          MIN: ${{ inputs.coverage-threshold }}
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          echo "total=${total}" >> "$GITHUB_OUTPUT"
+          echo "Total coverage ${total}% (minimum ${MIN}%)"
+          awk -v t="$total" -v m="$MIN" 'BEGIN { exit !(t + 0 >= m + 0) }' || {
+            echo "::error::coverage ${total}% is below the ${MIN}% gate"; exit 1; }
+
+      - name: govulncheck
+        id: vuln
+        if: inputs.govulncheck-version != ''
+        env:
+          VERSION: ${{ inputs.govulncheck-version }}
+        run: go run "golang.org/x/vuln/cmd/govulncheck@${VERSION}" ./...
+
+      - name: go build
+        id: build
+        env:
+          TARGET: ${{ inputs.build-target }}
+        run: CGO_ENABLED=0 go build -trimpath -o /dev/null "$TARGET"
+
+      - name: Summary
+        if: always()
+        uses: ./.golden-path/actions/job-summary
+        with:
+          title: Go service
+          working-directory: ${{ inputs.working-directory }}
+          results: |
+            toolchain|${{ steps.setup.outcome }}|Go ${{ inputs.go-version }}, cache hit ${{ steps.setup.outputs.cache-hit }}
+            go mod verify|${{ steps.verify.outcome }}|
+            go vet|${{ steps.vet.outcome }}|
+            golangci-lint|${{ steps.lint.outcome }}|${{ inputs.golangci-lint-version }}
+            go test|${{ steps.test.outcome }}|race=${{ inputs.race }}
+            coverage gate|${{ steps.coverage.outcome }}|${{ steps.coverage.outputs.total }}% (min ${{ inputs.coverage-threshold }}%)
+            govulncheck|${{ steps.vuln.outcome }}|${{ inputs.govulncheck-version }}
+            go build|${{ steps.build.outcome }}|CGO_ENABLED=0 -trimpath

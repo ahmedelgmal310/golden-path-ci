@@ -1,0 +1,138 @@
+# Reusable workflow: security baseline every repository gets.
+#   gitleaks           secrets in the full git history (or one directory)
+#   dependency-review  new vulnerable or disallowed dependencies in a pull request
+#   codeql             static analysis for the listed languages
+name: security-baseline
+
+on:
+  workflow_call:
+    inputs:
+      gitleaks-mode:
+        description: "git (scan the full history) or dir (scan scan-path as files)"
+        type: string
+        default: "git"
+      scan-path:
+        description: "Path to scan, relative to the repository root"
+        type: string
+        default: "."
+      gitleaks-image:
+        description: "Gitleaks image pinned by digest"
+        type: string
+        default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+      dependency-review-severity:
+        description: "Lowest advisory severity that fails dependency review (low, moderate, high, critical)"
+        type: string
+        default: "high"
+      codeql-languages:
+        description: 'JSON array of CodeQL languages, e.g. ["actions","go"]; [] skips CodeQL'
+        type: string
+        default: '["actions"]'
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out caller (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out golden-path actions at this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .golden-path
+          sparse-checkout: actions
+          persist-credentials: false
+
+      - name: Gitleaks
+        id: scan
+        env:
+          GITLEAKS_IMAGE: ${{ inputs.gitleaks-image }}
+          MODE: ${{ inputs.gitleaks-mode }}
+          SCAN_PATH: ${{ inputs.scan-path }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            git|dir) ;;
+            *) echo "::error::gitleaks-mode must be git or dir, got '$MODE'"; exit 1 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/gitleaks" && chmod 777 "$RUNNER_TEMP/gitleaks"
+          # A .gitleaks.toml at the scanned path is picked up automatically
+          # (extend the defaults, allowlist known test fixtures).
+          set +e
+          docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/gitleaks:/out" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            "$GITLEAKS_IMAGE" "$MODE" --no-banner --redact --verbose \
+            --report-format json --report-path /out/report.json "/repo/${SCAN_PATH}"
+          rc=$?
+          set -e
+          findings=$(jq 'length' "$RUNNER_TEMP/gitleaks/report.json" 2>/dev/null || echo "?")
+          echo "findings=${findings}" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ]; then
+            jq -r '.[] | "\(.RuleID) \(.File):\(.StartLine)"' "$RUNNER_TEMP/gitleaks/report.json" 2>/dev/null \
+              | while read -r rule loc; do echo "::error title=Gitleaks ${rule}::${loc}"; done || true
+            exit "$rc"
+          fi
+
+      - name: Summary
+        if: always()
+        uses: ./.golden-path/actions/job-summary
+        with:
+          title: Secret scanning
+          working-directory: ${{ inputs.scan-path }}
+          results: |
+            gitleaks ${{ inputs.gitleaks-mode }}|${{ steps.scan.outcome }}|${{ steps.scan.outputs.findings }} findings (redacted)
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: ${{ inputs.dependency-review-severity }}
+          comment-summary-in-pr: never
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    if: inputs.codeql-languages != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload results to code scanning
+      actions: read # required by CodeQL for workflow run metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.codeql-languages) }}
+    steps:
+      - name: Check out caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ (matrix.language == 'go' || matrix.language == 'java-kotlin' || matrix.language == 'c-cpp' || matrix.language == 'csharp' || matrix.language == 'swift') && 'autobuild' || 'none' }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}

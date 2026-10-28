@@ -1,0 +1,22 @@
+# build and test output
+dist/
+coverage.out
+*.test
+rendered/
+node_modules/
+.golden-path/
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# local tooling state
+.omc/
+.impeccable/

@@ -1,0 +1,56 @@
+name: golden-path job-summary
+description: >-
+  Write a uniform results table to the job summary. Every golden-path job ends
+  with one, so a reviewer reads the same layout for Go, Node, Helm, Terraform,
+  image and security checks instead of scrolling raw logs.
+author: Ahmed Elgamal
+
+inputs:
+  title:
+    description: "Heading for the summary section"
+    required: true
+  results:
+    description: >-
+      One check per line as "name|outcome|detail". outcome is a step outcome
+      (success, failure, skipped, cancelled) or any short text.
+    required: true
+  working-directory:
+    description: "Shown in the header so monorepo summaries stay distinguishable"
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Write job summary
+      shell: bash
+      env:
+        TITLE: ${{ inputs.title }}
+        RESULTS: ${{ inputs.results }}
+        WORKDIR: ${{ inputs.working-directory }}
+        SHA: ${{ github.sha }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        icon() {
+          case "$1" in
+            success) echo "pass" ;;
+            failure) echo "FAIL" ;;
+            skipped) echo "skipped" ;;
+            cancelled) echo "cancelled" ;;
+            *) echo "$1" ;;
+          esac
+        }
+        {
+          echo "### ${TITLE}"
+          echo
+          echo "\`${WORKDIR}\` at \`${SHA:0:7}\` ([run](${RUN_URL}))"
+          echo
+          echo "| Check | Result | Detail |"
+          echo "|---|---|---|"
+          while IFS='|' read -r name outcome detail; do
+            [ -z "${name// }" ] && continue
+            echo "| ${name} | $(icon "${outcome// /}") | ${detail} |"
+          done <<< "$RESULTS"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"

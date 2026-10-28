@@ -1,0 +1,25 @@
+# Negative fixture for workflow-policy: every job here breaks at least one rule.
+name: bad
+on:
+  pull_request_target:
+  push:
+
+jobs:
+  unpinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      - uses: docker://alpine:3.20
+
+  broad:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: write-all
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+  reusable:
+    uses: octo-org/ci/.github/workflows/build.yml@main

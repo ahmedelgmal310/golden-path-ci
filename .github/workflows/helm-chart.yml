@@ -1,0 +1,156 @@
+# Reusable workflow: Helm chart quality gate.
+# helm lint --strict -> helm-unittest -> helm template | kubeconform -strict.
+name: helm-chart
+
+on:
+  workflow_call:
+    inputs:
+      chart-path:
+        description: "Path to the chart directory (contains Chart.yaml)"
+        type: string
+        default: "."
+      values-files:
+        description: "Extra values files to lint and render, one per line (the chart defaults are always checked)"
+        type: string
+        default: ""
+      helm-version:
+        description: "Helm release"
+        type: string
+        default: "v4.3.0"
+      helm-unittest-version:
+        description: "helm-unittest plugin release; empty skips unit tests"
+        type: string
+        default: "v1.2.1"
+      kubernetes-version:
+        description: "Kubernetes version whose schemas kubeconform validates against"
+        type: string
+        default: "1.34.0"
+      kubeconform-version:
+        description: "kubeconform release (must match kubeconform-sha256)"
+        type: string
+        default: "v0.8.0"
+      kubeconform-sha256:
+        description: "SHA-256 of kubeconform-linux-amd64.tar.gz for kubeconform-version"
+        type: string
+        default: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+      cache-version:
+        description: "Cache namespace; change it to invalidate caches"
+        type: string
+        default: "v1"
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    name: Helm checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      CHART: ${{ inputs.chart-path }}
+      VALUES_FILES: ${{ inputs.values-files }}
+    steps:
+      - name: Check out caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out golden-path actions at this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .golden-path
+          sparse-checkout: actions
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Tool and schema cache
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/helm/plugins
+            ~/.cache/kubeconform
+            ~/.cache/gp-bin
+          key: gp-helm-${{ inputs.cache-version }}-${{ runner.os }}-${{ inputs.helm-version }}-${{ inputs.helm-unittest-version }}-${{ inputs.kubeconform-version }}-k8s${{ inputs.kubernetes-version }}
+
+      - name: Install kubeconform (SHA-256 verified)
+        env:
+          VERSION: ${{ inputs.kubeconform-version }}
+          SHA256: ${{ inputs.kubeconform-sha256 }}
+        run: |
+          set -euo pipefail
+          bin="$HOME/.cache/gp-bin/kubeconform-${VERSION}"
+          if [ ! -x "$bin/kubeconform" ]; then
+            mkdir -p "$bin"
+            curl -fsSLo "$RUNNER_TEMP/kubeconform.tgz" \
+              "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-linux-amd64.tar.gz"
+            echo "${SHA256}  $RUNNER_TEMP/kubeconform.tgz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/kubeconform.tgz" -C "$bin" kubeconform
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Install helm-unittest
+        if: inputs.helm-unittest-version != ''
+        env:
+          VERSION: ${{ inputs.helm-unittest-version }}
+        run: |
+          if helm plugin list | grep -q "^unittest"; then
+            echo "helm-unittest restored from cache"
+          else
+            helm plugin install https://github.com/helm-unittest/helm-unittest.git --version "$VERSION" --verify=false
+          fi
+
+      - name: helm lint --strict
+        id: lint
+        run: |
+          set -euo pipefail
+          helm lint "$CHART" --strict
+          while read -r f; do
+            [ -z "$f" ] && continue
+            helm lint "$CHART" --strict -f "$f"
+          done <<< "$VALUES_FILES"
+
+      - name: helm unittest
+        id: unittest
+        if: inputs.helm-unittest-version != ''
+        run: helm unittest "$CHART"
+
+      - name: kubeconform
+        id: kubeconform
+        env:
+          K8S_VERSION: ${{ inputs.kubernetes-version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/kubeconform" rendered
+          helm template ci "$CHART" > rendered/default.yaml
+          i=0
+          while read -r f; do
+            [ -z "$f" ] && continue
+            i=$((i + 1))
+            helm template ci "$CHART" -f "$f" > "rendered/values-${i}.yaml"
+          done <<< "$VALUES_FILES"
+          kubeconform -strict -summary -output pretty \
+            -kubernetes-version "$K8S_VERSION" \
+            -cache "$HOME/.cache/kubeconform" \
+            rendered/
+
+      - name: Summary
+        if: always()
+        uses: ./.golden-path/actions/job-summary
+        with:
+          title: Helm chart
+          working-directory: ${{ inputs.chart-path }}
+          results: |
+            helm lint --strict|${{ steps.lint.outcome }}|Helm ${{ inputs.helm-version }}
+            helm unittest|${{ steps.unittest.outcome }}|helm-unittest ${{ inputs.helm-unittest-version }}
+            kubeconform -strict|${{ steps.kubeconform.outcome }}|Kubernetes ${{ inputs.kubernetes-version }} schemas
+            tool cache|${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}|

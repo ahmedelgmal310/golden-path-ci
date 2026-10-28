@@ -1,0 +1,125 @@
+# Reusable workflow: Node.js / TypeScript service quality gate.
+# npm ci (no install scripts) -> npm audit -> lint/typecheck -> test -> build.
+name: node-service
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory that contains package.json and package-lock.json"
+        type: string
+        default: "."
+      node-version:
+        description: "Exact Node.js version"
+        type: string
+        default: "24.22.0"
+      audit-level:
+        description: "npm audit level that fails the build (low, moderate, high, critical); empty skips the audit"
+        type: string
+        default: "high"
+      lint-script:
+        description: "npm script for linting; skipped when the script does not exist"
+        type: string
+        default: "lint"
+      typecheck-script:
+        description: "npm script for type checking; skipped when the script does not exist"
+        type: string
+        default: "typecheck"
+      test-script:
+        description: "npm script for tests (required)"
+        type: string
+        default: "test"
+      build-script:
+        description: "npm script for the build; skipped when the script does not exist"
+        type: string
+        default: "build"
+      cache-version:
+        description: "Cache namespace; change it to invalidate caches"
+        type: string
+        default: "v1"
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check out caller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out golden-path actions at this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .golden-path
+          sparse-checkout: actions
+          persist-credentials: false
+
+      - name: Set up Node.js with caches
+        id: setup
+        uses: ./.golden-path/actions/setup-toolchain
+        with:
+          language: node
+          version: ${{ inputs.node-version }}
+          working-directory: ${{ inputs.working-directory }}
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: npm ci (install scripts disabled)
+        id: install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: npm audit
+        id: audit
+        if: inputs.audit-level != ''
+        env:
+          LEVEL: ${{ inputs.audit-level }}
+        run: npm audit --audit-level="$LEVEL"
+
+      - name: Lint
+        id: lint
+        env:
+          SCRIPT: ${{ inputs.lint-script }}
+        run: npm run "$SCRIPT" --if-present
+
+      - name: Type check
+        id: typecheck
+        env:
+          SCRIPT: ${{ inputs.typecheck-script }}
+        run: npm run "$SCRIPT" --if-present
+
+      - name: Test
+        id: test
+        env:
+          SCRIPT: ${{ inputs.test-script }}
+        run: npm run "$SCRIPT"
+
+      - name: Build
+        id: build
+        env:
+          SCRIPT: ${{ inputs.build-script }}
+        run: npm run "$SCRIPT" --if-present
+
+      - name: Summary
+        if: always()
+        uses: ./.golden-path/actions/job-summary
+        with:
+          title: Node.js service
+          working-directory: ${{ inputs.working-directory }}
+          results: |
+            toolchain|${{ steps.setup.outcome }}|Node.js ${{ inputs.node-version }}, cache hit ${{ steps.setup.outputs.cache-hit }}
+            npm ci|${{ steps.install.outcome }}|--ignore-scripts
+            npm audit|${{ steps.audit.outcome }}|level ${{ inputs.audit-level }}
+            lint|${{ steps.lint.outcome }}|npm run ${{ inputs.lint-script }}
+            type check|${{ steps.typecheck.outcome }}|npm run ${{ inputs.typecheck-script }}
+            test|${{ steps.test.outcome }}|npm run ${{ inputs.test-script }}
+            build|${{ steps.build.outcome }}|npm run ${{ inputs.build-script }}

@@ -1,0 +1,52 @@
+# Every update waits 14 days after release (cooldown), the same rule
+# docs/versions.md applies to manual bumps. Negative fixtures are deliberately
+# outdated and are not listed here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /actions/*
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directories:
+      - /tools/workflow-policy
+      - /examples/go-service
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /examples/ts-service
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      npm:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /examples/go-service
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+
+  - package-ecosystem: terraform
+    directory: /examples/terraform-module
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

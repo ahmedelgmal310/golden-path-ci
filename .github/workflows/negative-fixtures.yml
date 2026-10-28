@@ -1,0 +1,55 @@
+# Negative fixtures: the real reusable workflows run against known-bad inputs.
+# Every job in this workflow is EXPECTED TO FAIL, so its runs are red by design.
+#
+# It is not triggered by pushes. The self-test meta-test job dispatches it on a
+# throwaway meta-test/* branch whose commit has the same tree as the commit
+# under test, so the red run never lands on main's commit status. The
+# meta-test then asserts that each job failed at the expected step for the
+# expected reason. See scripts/meta-test.sh.
+name: negative-fixtures
+
+run-name: "negative fixtures for ${{ inputs.source-sha }} (expected to fail)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-sha:
+        description: "Commit under test (the meta-test passes it for traceability)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: negative-fixtures-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  leaked-secret:
+    name: leaked-secret
+    uses: ./.github/workflows/security-baseline.yml
+    with:
+      gitleaks-mode: dir
+      scan-path: examples/negative/leaked-secret
+      codeql-languages: "[]"
+
+  critical-cve-image:
+    name: critical-cve-image
+    uses: ./.github/workflows/container-image.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/negative-critical-cve
+      context: examples/negative/critical-cve-image
+      platforms: linux/amd64
+      push: false
+
+  unformatted-terraform:
+    name: unformatted-terraform
+    uses: ./.github/workflows/terraform.yml
+    with:
+      working-directory: examples/negative/unformatted-terraform

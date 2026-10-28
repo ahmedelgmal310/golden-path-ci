@@ -1,0 +1,17 @@
+# What a team that owns a Terraform module commits to adopt the golden path.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  terraform:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/terraform.yml@v1
+  security:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/security-baseline.yml@v1
+    permissions: { contents: read, security-events: write, actions: read }

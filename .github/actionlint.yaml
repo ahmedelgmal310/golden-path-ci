@@ -1,0 +1,9 @@
+# actionlint 1.7.12 (the newest release past the 14-day cooldown) predates the
+# job.workflow_repository / workflow_sha / workflow_ref / workflow_file_path
+# context properties. The reusable workflows use them to check out their own
+# composite actions at the exact commit being run. This ignores only that one
+# message; every other check stays on.
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'property "workflow_(repository|sha|ref|file_path)" is not defined in object type'

@@ -1,0 +1,145 @@
+# Self-test: this repository is its own first consumer. Every reusable
+# workflow runs against a sample project in examples/, from the same commit,
+# and the meta-test proves the gates fail on known-bad inputs.
+name: self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ACTIONLINT_IMAGE: mirror.gcr.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101
+
+jobs:
+  policy:
+    name: Workflow policy (pins, permissions, actionlint, zizmor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./actions/setup-toolchain
+        with:
+          language: go
+          version: "1.27.3"
+          working-directory: tools/workflow-policy
+      - name: workflow-policy unit tests
+        working-directory: tools/workflow-policy
+        run: go test -race -cover ./...
+      - name: workflow-policy (every action pinned by SHA, permissions declared, timeouts)
+        run: |
+          go -C tools/workflow-policy build -o "$RUNNER_TEMP/workflow-policy" .
+          "$RUNNER_TEMP/workflow-policy" .github/workflows actions
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
+          docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color examples/*/.github/workflows/*.yml
+      - name: zizmor
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$ZIZMOR_IMAGE" --offline --min-severity=low .github actions
+
+  go-service:
+    name: go-service
+    uses: ./.github/workflows/go-service.yml
+    with:
+      working-directory: examples/go-service
+
+  node-service:
+    name: node-service
+    uses: ./.github/workflows/node-service.yml
+    with:
+      working-directory: examples/ts-service
+
+  helm-chart:
+    name: helm-chart
+    uses: ./.github/workflows/helm-chart.yml
+    with:
+      chart-path: examples/helm-chart/hello
+      values-files: examples/helm-chart/hello/values-prod.yaml
+
+  terraform:
+    name: terraform
+    uses: ./.github/workflows/terraform.yml
+    with:
+      working-directory: examples/terraform-module
+
+  container-image:
+    name: container-image
+    needs: go-service
+    uses: ./.github/workflows/container-image.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/example-go-service
+      context: examples/go-service
+      push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+  security-baseline:
+    name: security-baseline
+    uses: ./.github/workflows/security-baseline.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    with:
+      codeql-languages: '["actions","go","javascript-typescript"]'
+
+  yaml-budget:
+    name: Consumer YAML budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Count lines a consumer writes vs. lines the library maintains
+        run: scripts/yaml-budget.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+  meta-test:
+    name: Meta-test (negative fixtures must fail for the right reason)
+    # Needs a write token to create a throwaway branch: skipped for forks and Dependabot.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    needs: policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # create and delete the throwaway meta-test/* branch
+      actions: write # dispatch negative-fixtures.yml and read its jobs and logs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run negative fixtures and assert each failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/meta-test.sh
+
+  all-green:
+    name: All self-tests passed
+    if: always()
+    needs: [policy, go-service, node-service, helm-chart, terraform, container-image, security-baseline, yaml-budget, meta-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # meta-test may be skipped (fork / Dependabot PRs); everything else must succeed.
+          echo "$RESULTS" | jq -e 'to_entries | all(.value.result == "success" or (.key == "meta-test" and .value.result == "skipped"))' > /dev/null

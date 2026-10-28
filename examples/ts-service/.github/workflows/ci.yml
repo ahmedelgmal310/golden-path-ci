@@ -1,0 +1,19 @@
+# What a TypeScript service team commits to adopt the golden path.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  node:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/node-service.yml@v1
+  security:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/security-baseline.yml@v1
+    permissions: { contents: read, security-events: write, actions: read }
+    with:
+      codeql-languages: '["actions","javascript-typescript"]'

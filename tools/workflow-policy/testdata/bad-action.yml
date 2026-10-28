@@ -1,0 +1,9 @@
+name: bad composite
+description: Composite action with an unpinned step.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v6
+      with:
+        path: ~/.cache
+        key: k

@@ -1,0 +1,117 @@
+# Release: triggered by pushing an immutable vX.Y.Z tag.
+#   verify   tag is on main, CHANGELOG has the section, self-test passed on that commit
+#   publish  GitHub Release with the CHANGELOG section as notes, then move the
+#            floating major tag (vX) to the release commit
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # look up the self-test run for the tagged commit
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      major: ${{ steps.meta.outputs.major }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Parse tag
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "major=v${version%%.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Tag is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on main"; exit 1; }
+
+      - name: Self-test passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow self-test.yml --commit "$GITHUB_SHA" \
+            --event push --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')"
+          if [ "$conclusion" -lt 1 ]; then
+            echo "::error::no successful self-test run on main for ${GITHUB_SHA}; release only green commits"
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no section for [${VERSION}]"
+            exit 1
+          fi
+          cat release-notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  publish:
+    name: Publish release and move ${{ needs.verify.outputs.major }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release and update the major tag
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --notes-file release-notes.md
+          fi
+
+      - name: Move floating major tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAJOR: ${{ needs.verify.outputs.major }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${MAJOR}" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "${MAJOR} -> ${TAG} (${GITHUB_SHA})" | tee -a "$GITHUB_STEP_SUMMARY"

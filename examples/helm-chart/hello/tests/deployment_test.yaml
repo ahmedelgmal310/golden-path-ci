@@ -1,0 +1,47 @@
+suite: deployment
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: runs hardened, non-root, with probes
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz
+
+  - it: uses the digest when one is set
+    set:
+      image.digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/ahmedelgmal310/golden-path-ci/example-go-service@sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+  - it: uses the tag when no digest is set
+    set:
+      image.tag: sha-abc1234
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/ahmedelgmal310/golden-path-ci/example-go-service:sha-abc1234
+
+  - it: honours replicaCount
+    set:
+      replicaCount: 5
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 5

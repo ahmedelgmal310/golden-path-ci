@@ -1,0 +1,20 @@
+# What a team that owns a Helm chart commits to adopt the golden path.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  chart:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/helm-chart.yml@v1
+    with:
+      chart-path: hello
+      values-files: hello/values-prod.yaml
+  security:
+    uses: ahmedelgmal310/golden-path-ci/.github/workflows/security-baseline.yml@v1
+    permissions: { contents: read, security-events: write, actions: read }

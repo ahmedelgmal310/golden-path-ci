@@ -1,0 +1,9 @@
+apiVersion: v2
+name: hello
+description: Sample chart consumed by the golden-path helm-chart workflow (deploys the go-service example)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Ahmed Elgamal
+    url: https://github.com/ahmedelgmal310

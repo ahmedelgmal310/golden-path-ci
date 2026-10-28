@@ -1,0 +1,12 @@
+# Repository-wide Gitleaks config: the default rules plus one path allowlist.
+# The negative fixture below is a deliberately fake key that the meta-test
+# scans on its own (gitleaks dir, default rules only) and expects to FAIL.
+# It is exempt from the repository scan and nothing else is.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Negative test fixture for the security-baseline workflow"
+paths = [
+  '''^examples/negative/leaked-secret/''',
+]
