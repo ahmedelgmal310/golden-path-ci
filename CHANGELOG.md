@@ -25,7 +25,8 @@ the upgrade path.
     a read-only token. Then, only when `push` is true: a multi-arch build and
     push to GHCR, cosign keyless signature, CycloneDX SBOM attestation, SLSA
     build provenance (`actions/attest-build-provenance`), and verification of
-    all three. Outputs: `digest`, `image`.
+    all three. Signing and attesting retry transient Sigstore errors (3 attempts).
+    Outputs: `digest`, `image`.
   - `helm-chart.yml`: `helm lint --strict`, helm-unittest, and `helm template`
     piped through `kubeconform -strict` for the chart defaults and every
     `values-files` entry.

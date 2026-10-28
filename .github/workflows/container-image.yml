@@ -266,7 +266,10 @@ jobs:
         id: sign
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        run: |
+          # Fulcio and Rekor are public services; retry transient 5xx errors.
+          retry() { local n; for n in 1 2 3; do "$@" && return 0; echo "attempt ${n} failed; retrying in $((n * 15))s"; sleep $((n * 15)); done; return 1; }
+          retry cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: SBOM (CycloneDX)
         id: sbom
@@ -286,7 +289,10 @@ jobs:
         id: attest-sbom
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
-        run: cosign attest --yes --type cyclonedx --predicate "$RUNNER_TEMP/sbom/sbom.cdx.json" "${IMAGE}@${DIGEST}"
+        run: |
+          # Fulcio and Rekor are public services; retry transient 5xx errors.
+          retry() { local n; for n in 1 2 3; do "$@" && return 0; echo "attempt ${n} failed; retrying in $((n * 15))s"; sleep $((n * 15)); done; return 1; }
+          retry cosign attest --yes --type cyclonedx --predicate "$RUNNER_TEMP/sbom/sbom.cdx.json" "${IMAGE}@${DIGEST}"
 
       - name: SLSA build provenance
         id: provenance
