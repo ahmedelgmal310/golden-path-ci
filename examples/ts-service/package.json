@@ -15,7 +15,7 @@
     "start": "node dist/main.js"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
-    "typescript": "6.0.3"
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
   }
 }
