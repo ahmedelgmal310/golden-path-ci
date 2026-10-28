@@ -156,6 +156,8 @@ func (c *checker) steps(steps *yaml.Node) {
 func (c *checker) uses(n *yaml.Node) {
 	v := n.Value
 	switch {
+	case strings.HasPrefix(v, "$/"):
+		return // self-repository syntax: resolves to the running commit, a pin by construction
 	case strings.HasPrefix(v, "./"):
 		return // local action or workflow: versioned with this repository
 	case strings.HasPrefix(v, "docker://"):

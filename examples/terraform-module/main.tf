@@ -4,6 +4,12 @@
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "kms" {
+  # A KMS key policy is attached to one key, so "*" means "this key", and the
+  # account-root statement only delegates to IAM (the AWS default key policy).
+  # The three generic IAM checks below do not model key policies.
+  #checkov:skip=CKV_AWS_109:Key policy resource "*" is scoped to this key; root statement delegates to IAM
+  #checkov:skip=CKV_AWS_111:Key policy resource "*" is scoped to this key; root statement delegates to IAM
+  #checkov:skip=CKV_AWS_356:Key policy resource "*" is scoped to this key; root statement delegates to IAM
   statement {
     sid       = "AccountAdministration"
     actions   = ["kms:*"]

@@ -84,18 +84,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out golden-path actions at this workflow's commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .golden-path
-          sparse-checkout: actions
-          persist-credentials: false
 
       - name: Version stamp
         id: stamp
-        uses: ./.golden-path/actions/version-stamp
+        uses: $/actions/version-stamp
 
       - name: hadolint
         id: hadolint
@@ -174,7 +166,7 @@ jobs:
 
       - name: Summary
         if: always()
-        uses: ./.golden-path/actions/job-summary
+        uses: $/actions/job-summary
         with:
           title: Container image (build and scan)
           working-directory: ${{ inputs.context }}
@@ -208,18 +200,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out golden-path actions at this workflow's commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .golden-path
-          sparse-checkout: actions
-          persist-credentials: false
 
       - name: Version stamp
         id: stamp
-        uses: ./.golden-path/actions/version-stamp
+        uses: $/actions/version-stamp
 
       - name: Image tags
         id: tags
@@ -342,7 +326,7 @@ jobs:
 
       - name: Summary
         if: always()
-        uses: ./.golden-path/actions/job-summary
+        uses: $/actions/job-summary
         with:
           title: Container image (publish)
           working-directory: ${{ inputs.context }}

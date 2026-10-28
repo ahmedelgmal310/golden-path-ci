@@ -1,0 +1,14 @@
+# zizmor configuration. One documented exception:
+#
+# self-repository: step actions use the "$/" self-repository syntax everywhere.
+# The three top-level callers below still call the reusable workflows as
+# "./.github/workflows/x.yml". A local reusable-workflow call already resolves to
+# the caller's own commit, not the workspace, and actionlint 1.7.12 validates
+# the inputs of "./" calls but rejects "$/" calls. Keeping "./" there keeps that
+# input type-checking.
+rules:
+  self-repository:
+    ignore:
+      - self-test.yml
+      - negative-fixtures.yml
+      - benchmark.yml

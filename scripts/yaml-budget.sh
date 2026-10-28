@@ -22,7 +22,7 @@ for f in examples/*/.github/workflows/*.yml; do
   for w in "${workflows[@]}"; do
     while read -r a; do
       [ -n "$a" ] && files+=("actions/${a}/action.yml")
-    done < <(grep -oE '\./\.golden-path/actions/[a-z-]+' "$w" | sed 's#.*/##' | sort -u)
+    done < <(grep -oE '\$/actions/[a-z-]+' "$w" | sed 's#.*/##' | sort -u)
   done
   mapfile -t files < <(printf '%s\n' "${files[@]}" | sort -u)
   library=$(loc "${files[@]}")

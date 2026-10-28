@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./actions/setup-toolchain
+      - uses: $/actions/setup-toolchain
         with:
           language: go
           version: "1.27.3"
@@ -46,7 +46,7 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
           docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color examples/*/.github/workflows/*.yml
       - name: zizmor
-        run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$ZIZMOR_IMAGE" --offline --min-severity=low .github actions
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$ZIZMOR_IMAGE" --offline --config .github/zizmor.yml .github actions
 
   go-service:
     name: go-service

@@ -1,9 +1,14 @@
-# actionlint 1.7.12 (the newest release past the 14-day cooldown) predates the
-# job.workflow_repository / workflow_sha / workflow_ref / workflow_file_path
-# context properties. The reusable workflows use them to check out their own
-# composite actions at the exact commit being run. This ignores only that one
-# message; every other check stays on.
+# actionlint 1.7.12 is the newest release past the 14-day cooldown. It predates
+# two GitHub Actions features this library depends on, so exactly these two
+# messages are ignored. Every other check stays on.
+#
+# 1. The "$/path" self-repository syntax for step actions (GitHub, July 2026).
+#    The reusable workflows use it to run their composite actions from the
+#    same commit as the workflow itself.
+# 2. The job.workflow_ref / workflow_repository / workflow_file_path context
+#    properties. container-image.yml uses them to verify the cosign identity.
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
+      - 'specifying action "\$/[^"]+" in invalid format because ref is missing'
       - 'property "workflow_(repository|sha|ref|file_path)" is not defined in object type'

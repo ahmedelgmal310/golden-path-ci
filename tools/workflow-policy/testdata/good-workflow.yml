@@ -16,6 +16,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./actions/local-thing
+      - uses: $/actions/same-commit-thing
       - uses: docker://alpine@sha256:adab3844f497ab9171f070d4cae4114b5aec565ac772e2f2579405b78be67c96
 
   call:
