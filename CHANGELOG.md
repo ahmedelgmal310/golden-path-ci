@@ -10,6 +10,14 @@ the upgrade path.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-28
+
+### Fixed
+
+- `release.yml`: the floating major tag is looked up with the exact
+  `git/ref/tags/vX` endpoint. The prefix-matching `git/refs/tags/vX` endpoint
+  treated `v1.0.0` as an existing `v1`, so the first release could not create `v1`.
+
 ## [1.0.0] - 2026-10-28
 
 ### Added
@@ -50,5 +58,6 @@ the upgrade path.
   the commit, publishes the GitHub Release from this file, and moves the
   floating major tag.
 
-[Unreleased]: https://github.com/ahmedelgmal310/golden-path-ci/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ahmedelgmal310/golden-path-ci/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ahmedelgmal310/golden-path-ci/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ahmedelgmal310/golden-path-ci/releases/tag/v1.0.0

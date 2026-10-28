@@ -109,7 +109,9 @@ jobs:
           MAJOR: ${{ needs.verify.outputs.major }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" >/dev/null 2>&1; then
+          # git/ref (singular) is an exact lookup; git/refs/tags/v1 would also
+          # match v1.0.0 as a prefix and report the major tag as existing.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MAJOR}" >/dev/null 2>&1; then
             gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" -f sha="$GITHUB_SHA" -F force=true >/dev/null
           else
             gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${MAJOR}" -f sha="$GITHUB_SHA" >/dev/null
