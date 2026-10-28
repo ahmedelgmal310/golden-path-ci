@@ -29,6 +29,12 @@ jobs:
   leaked-secret:
     name: leaked-secret
     uses: ./.github/workflows/security-baseline.yml
+    # GitHub validates nested-job permissions before it evaluates `if:`, so the
+    # caller must grant what the (skipped) CodeQL job declares.
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     with:
       gitleaks-mode: dir
       scan-path: examples/negative/leaked-secret
