@@ -277,6 +277,7 @@ cd tools/workflow-policy && go test ./... && go run . ../../.github/workflows ..
 - Immutable release tags `vX.Y.Z`, plus a floating major tag `v1` that always points at the latest `v1.x.y`.
 - [`CHANGELOG.md`](CHANGELOG.md) follows Keep a Changelog. The [consumer guide](docs/consumer-guide.md) defines what counts as breaking. Stricter gate defaults count as a **major** change, because they fail builds that used to pass.
 - [`release.yml`](.github/workflows/release.yml) runs when a `vX.Y.Z` tag is pushed. It verifies that the tag is on `main`, that **self-test passed for that exact commit**, and that the CHANGELOG has the section. It then publishes the GitHub Release with that section as notes and moves `vX` to the release.
+- Current release: [**v1.0.1**](https://github.com/ahmedelgmal310/golden-path-ci/releases/tag/v1.0.1), and `v1` points at it. It was published by [release run 40733495752](https://github.com/ahmedelgmal310/golden-path-ci/actions/runs/40733495752). The v1.0.0 release run created the release but failed to create `v1`. A prefix-matching API lookup treated `v1.0.0` as an existing `v1`. v1.0.1 fixes that, and its own release run is the proof.
 - Every tool and action version is at least 14 days old when adopted, with one documented security exception (Go 1.27.3). See [docs/versions.md](docs/versions.md). Dependabot applies the same 14-day cooldown.
 
 ## Limitations
@@ -288,6 +289,7 @@ cd tools/workflow-policy && go test ./... && go run . ../../.github/workflows ..
 - **Consumer examples are documentation, not executed files.** `examples/*/.github/workflows/ci.yml` show what a team commits. Self-test runs the same workflows with the same inputs from the local checkout, but nothing checks that the two stay identical.
 - **The Terraform lock file covers `linux_amd64` only.** That is enough for CI. Developers on other platforms run `terraform providers lock -platform=<os_arch>` once.
 - **Kubernetes schemas stop at 1.34.** kubeconform's default schema catalogue (yannh/kubernetes-json-schema) has nothing newer yet. Override `kubernetes-version` if your cluster is older.
+- **Signing depends on public Sigstore.** One run failed when Rekor returned HTTP 502. `cosign sign` and `cosign attest` now retry 3 times with backoff. A longer outage still fails the publish job, which fails closed: nothing unsigned is reported as done.
 - **GitHub.com only.** The `$/` syntax and `job.workflow_*` context are not available on GitHub Enterprise Server.
 
 ## Runbook
@@ -301,6 +303,7 @@ cd tools/workflow-policy && go test ./... && go run . ../../.github/workflows ..
 | Release workflow refuses | It prints why: the tag is not on `main`, no green self-test for the commit, or no CHANGELOG section. Fix that, then delete and re-push the tag. |
 | Bumping a tool or action | Wait out the 14-day cooldown (or document a security exception). Update the SHA and comment and `docs/versions.md` in the same PR. Self-test plus meta-test must stay green. |
 | Meta-test fails | Read its summary table. It names the fixture, the step it expected, and what actually happened (wrong step, missing evidence, or an unexpected pass). An unexpected pass means a gate stopped working. Treat it as a security bug. |
+| Publish fails at `Sign (keyless)` with a Sigstore 5xx after 3 retries | It is a public-service outage, not a code problem. Check status.sigstore.dev, then re-run the failed job. The pushed digest is unchanged. |
 | Verifying a published image | `cosign verify <image>@<digest> --certificate-identity https://github.com/ahmedelgmal310/golden-path-ci/.github/workflows/container-image.yml@refs/heads/main --certificate-oidc-issuer https://token.actions.githubusercontent.com` and `gh attestation verify oci://<image>@<digest> --repo <consumer-repo>` |
 | Measuring cache impact | Dispatch `benchmark.yml` with a new `cache-version` (cold), then again with the same value (warm). Run `scripts/bench-report.sh <cold-run> <warm-run>`. |
 
